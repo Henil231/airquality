@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Air Quality Alert Hotspots</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    html, body { margin: 0; height: 100%; }
+    #map { height: 100%; }
+    .legend {
+      background: #fff; padding: 8px 10px; line-height: 20px;
+      border-radius: 4px; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+      font: 13px/1.4 sans-serif; color: #333;
+    }
+    .legend i {
+      display: inline-block; width: 12px; height: 12px;
+      margin-right: 6px; border-radius: 50%; opacity: 0.85;
+    }
+    .status {
+      position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+      z-index: 1000; background: #fdecea; color: #611a15;
+      padding: 6px 12px; border-radius: 4px; font: 13px sans-serif;
+      display: none; max-width: 80%; text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <div id="status" class="status"></div>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    // Marker color by EPA alert level. Unhealthy orange, Hazardous red.
+    var COLORS = {
+      "Unhealthy for Sensitive Groups": "#f0a30a",
+      "Unhealthy": "#f97316",
+      "Very Unhealthy": "#8e44ad",
+      "Hazardous": "#dc2626"
+    };
+    var DEFAULT_COLOR = "#6b7280";
+
+    function colorFor(level) {
+      return COLORS[level] || DEFAULT_COLOR;
+    }
+
+    var map = L.map("map").setView([20, 0], 2);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: "&copy; OpenStreetMap contributors"
+    }).addTo(map);
+
+    function showStatus(msg) {
+      var el = document.getElementById("status");
+      el.textContent = msg;
+      el.style.display = "block";
+    }
+
+    function render(data) {
+      var layer = L.geoJSON(data, {
+        pointToLayer: function (feature, latlng) {
+          var p = feature.properties || {};
+          return L.circleMarker(latlng, {
+            radius: 8,
+            color: "#333",
+            weight: 1,
+            fillColor: colorFor(p.level),
+            fillOpacity: 0.85
+          });
+        },
+        onEachFeature: function (feature, marker) {
+          var p = feature.properties || {};
+          marker.bindPopup(
+            "<b>" + (p.level || "Alert") + "</b><br>" +
+            "sensor: " + (p.sensor_id || "?") + "<br>" +
+            (p.pollutant || "?") + " = " + (p.value == null ? "?" : p.value) + "<br>" +
+            (p.ts || "")
+          );
+        }
+      }).addTo(map);
+
+      var bounds = layer.getBounds();
+      if (bounds.isValid()) {
+        map.fitBounds(bounds.pad(0.2));
+      } else {
+        showStatus("No alerts yet. Run ./local.sh stream, then ./local.sh map.");
+      }
+    }
+
+    fetch("./alerts.geojson")
+      .then(function (r) {
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        return r.json();
+      })
+      .then(render)
+      .catch(function (err) {
+        showStatus(
+          "Could not load ./alerts.geojson (" + err.message + "). Run ./local.sh map. " +
+          "If the browser blocks file access, serve this folder over http."
+        );
+      });
+
+    // Legend, one swatch per alert level.
+    var legend = L.control({ position: "bottomright" });
+    legend.onAdd = function () {
+      var div = L.DomUtil.create("div", "legend");
+      var levels = ["Unhealthy for Sensitive Groups", "Unhealthy", "Very Unhealthy", "Hazardous"];
+      div.innerHTML = "<b>Alert level</b><br>";
+      for (var i = 0; i < levels.length; i++) {
+        div.innerHTML += '<i style="background:' + colorFor(levels[i]) + '"></i>' + levels[i] + "<br>";
+      }
+      return div;
+    };
+    legend.addTo(map);
+  </script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+Live streaming test, captured 2026-07-20
+Commands: ./local.sh web  then  ./local.sh live
+
+A continuous Spark Structured Streaming query ran while a steady feed pushed
+about 50 readings per second into Kafka. The web dashboard (http://localhost:8050)
+polled PostGIS every 3 seconds and showed the alert count climbing live.
+
+Alert count over about 40 seconds: 270, 536, 855, 1120, 1382 (about 33 alerts
+written per second). Detection latency (reading timestamp to alert row): avg 0.9 s.
+
+This is the true real time figure. The continuous stream processes a micro batch
+roughly every second, so a dangerous spike becomes an alert in about one second,
+versus up to 60 minutes for the hourly batch baseline. Latency stayed near one
+second while the feed ran, so the pipeline kept pace with the input rate.

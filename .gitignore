@@ -1,0 +1,7 @@
+.env
+__pycache__/
+*.pyc
+spark-warehouse/
+metastore_db/
+derby.log
+map/alerts.geojson

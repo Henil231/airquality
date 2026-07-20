@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Air Quality, Live</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: system-ui, sans-serif; background: #0f1420; color: #e6e9ef; }
+    header { padding: 16px 20px; border-bottom: 1px solid #232a3a; display: flex; justify-content: space-between; align-items: baseline; }
+    header h1 { font-size: 18px; margin: 0; }
+    #updated { font-size: 12px; color: #8b93a7; }
+    .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; padding: 16px 20px; }
+    .tile { background: #171d2b; border: 1px solid #232a3a; border-radius: 10px; padding: 14px 16px; }
+    .tile .label { font-size: 12px; color: #8b93a7; text-transform: uppercase; letter-spacing: .04em; }
+    .tile .value { font-size: 28px; font-weight: 600; margin-top: 4px; }
+    .grid { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; padding: 0 20px 20px; }
+    #map { height: 460px; border-radius: 10px; border: 1px solid #232a3a; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #232a3a; }
+    th { color: #8b93a7; font-weight: 500; }
+    .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; color: #0f1420; }
+    @media (max-width: 800px) { .grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Real Time Air Quality Alerts</h1>
+    <span id="updated">connecting...</span>
+  </header>
+  <div class="tiles" id="tiles"></div>
+  <div class="grid">
+    <div id="map"></div>
+    <div>
+      <table>
+        <thead><tr><th>Sensor</th><th>Level</th><th>AQI</th><th>Time</th></tr></thead>
+        <tbody id="recent"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    const COLORS = {
+      "Unhealthy for Sensitive Groups": "#f0a30a",
+      "Unhealthy": "#f97316",
+      "Very Unhealthy": "#8e44ad",
+      "Hazardous": "#dc2626",
+    };
+    const color = (lvl) => COLORS[lvl] || "#6b7280";
+
+    const map = L.map("map").setView([40.5, -74.1], 9);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: "OpenStreetMap", maxZoom: 18,
+    }).addTo(map);
+    let layer = L.layerGroup().addTo(map);
+
+    function tile(label, value) {
+      return `<div class="tile"><div class="label">${label}</div><div class="value">${value}</div></div>`;
+    }
+
+    async function refresh() {
+      try {
+        const s = await (await fetch("/api/stats")).json();
+        let tiles = tile("Total alerts", s.total)
+          + tile("Avg latency", s.avg_latency + "s")
+          + tile("Max latency", s.max_latency + "s");
+        for (const row of s.by_level) tiles += tile(row.level, row.count);
+        document.getElementById("tiles").innerHTML = tiles;
+
+        document.getElementById("recent").innerHTML = s.recent.map(r =>
+          `<tr><td>${r.sensor_id}</td>`
+          + `<td><span class="pill" style="background:${color(r.level)}">${r.level}</span></td>`
+          + `<td>${r.value}</td><td>${new Date(r.ts).toLocaleTimeString()}</td></tr>`
+        ).join("");
+
+        const gj = await (await fetch("/api/geojson")).json();
+        layer.clearLayers();
+        L.geoJSON(gj, {
+          pointToLayer: (f, latlng) => L.circleMarker(latlng, {
+            radius: 6, color: color(f.properties.level),
+            fillColor: color(f.properties.level), fillOpacity: 0.8, weight: 1,
+          }).bindPopup(`${f.properties.level}: AQI ${f.properties.value} (sensor ${f.properties.sensor_id})`),
+        }).addTo(layer);
+
+        document.getElementById("updated").textContent = "updated " + new Date().toLocaleTimeString();
+      } catch (e) {
+        document.getElementById("updated").textContent = "waiting for data...";
+      }
+    }
+
+    refresh();
+    setInterval(refresh, 3000);
+  </script>
+</body>
+</html>
