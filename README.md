@@ -3,6 +3,12 @@
 A two lane big data pipeline that ingests live air quality readings, alerts on
 dangerous spikes in about one second, and mines history for trends.
 
+## Collaborators
+
+- Olha Shevchuk
+- Chung Hyun Kim
+- Henil Dineshbhai Patel
+
 ## Quickstart, run it locally
 
 Make sure Docker is running, then:
