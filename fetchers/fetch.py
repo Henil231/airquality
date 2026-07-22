@@ -13,20 +13,29 @@ import random
 import sys
 import time
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+
+
+# OpenAQ v3 serves latest readings per parameter, there is no global /latest.
+# 2 is pm25, confirm with GET /v3/parameters.
+OPENAQ_PM25 = 2
 
 
 def openaq_latest(limit):
     key = os.getenv("OPENAQ_KEY")
+    if not key:
+        # Fall back to synthetic readings so local dev needs no key or network.
+        print("openaq key missing (set OPENAQ_KEY); using synthetic data", file=sys.stderr)
+        yield from (None for _ in range(limit))
+        return
     request = urllib.request.Request(
-        f"https://api.openaq.org/v3/latest?limit={limit}",
-        headers={"X-API-Key": key} if key else {},
+        f"https://api.openaq.org/v3/parameters/{OPENAQ_PM25}/latest?limit={limit}",
+        headers={"X-API-Key": key},
     )
     try:
         payload = json.load(urllib.request.urlopen(request, timeout=10))
         yield from payload.get("results", [])
     except Exception as error:
-        # Fall back to synthetic readings so local dev needs no key or network.
         print(f"openaq unavailable ({error}); using synthetic data", file=sys.stderr)
         yield from (None for _ in range(limit))
 
@@ -34,12 +43,13 @@ def openaq_latest(limit):
 def to_reading(raw):
     if raw:
         coords = raw.get("coordinates") or {}
+        # v3 latest carries no parameter or unit field, both are fixed by the endpoint.
         return {
             "source": "openaq",
-            "sensor_id": str(raw.get("location", "unknown")),
-            "pollutant": raw.get("parameter", "pm25"),
+            "sensor_id": str(raw.get("sensorsId", "unknown")),
+            "pollutant": "pm25",
             "value": float(raw.get("value", 0) or 0),
-            "unit": raw.get("unit", "ug/m3"),
+            "unit": "ug/m3",
             "lat": coords.get("latitude"),
             "lon": coords.get("longitude"),
             "ts": time.time(),
@@ -61,11 +71,14 @@ def airnow_latest(limit):
     if not key:
         print("airnow key missing (set AIRNOW_KEY); skipping", file=sys.stderr)
         return
-    # Current hour PM2.5 observations across the continental US bounding box.
-    hour = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H")
+    # PM2.5 across the continental US. AirNow publishes with a lag, so ask for a
+    # two hour window, a single current hour usually comes back empty.
+    now = datetime.now(timezone.utc)
+    end = now.strftime("%Y-%m-%dT%H")
+    start = (now - timedelta(hours=2)).strftime("%Y-%m-%dT%H")
     request = urllib.request.Request(
         "https://www.airnowapi.org/aq/data/"
-        f"?startDate={hour}&endDate={hour}"
+        f"?startDate={start}&endDate={end}"
         "&parameters=PM25&BBOX=-125,24,-66,50"
         "&dataType=B&format=application/json&verbose=1"
         f"&API_KEY={key}"
