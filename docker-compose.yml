@@ -34,6 +34,10 @@ services:
     depends_on: [db]
     environment:
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      # Data source keys, read from .env. Empty by default so the synthetic feed still works keyless.
+      OPENAQ_KEY: ${OPENAQ_KEY:-}
+      AIRNOW_KEY: ${AIRNOW_KEY:-}
+      PURPLEAIR_KEY: ${PURPLEAIR_KEY:-}
     ports: ["8080:8080"]
     volumes:
       - ./airflow/dags:/opt/airflow/dags
