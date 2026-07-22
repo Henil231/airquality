@@ -2,12 +2,17 @@
 """Live dashboard server. Queries PostGIS on each request and serves JSON."""
 import json
 import os
+import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import psycopg2
 
 DSN = os.getenv("PG_DSN", "postgresql://air:air@db:5432/air")
 HERE = os.path.dirname(os.path.abspath(__file__))
+
+# Reuse the one EPA AQI implementation from the streaming job, do not re-derive it.
+sys.path.insert(0, os.path.dirname(HERE))
+from spark.stream_alerts import pm25_aqi
 
 
 def query(sql):
@@ -55,6 +60,40 @@ def geojson():
     return rows[0][0]
 
 
+def readings_geojson():
+    """Every recent station reading as a point, colored by its EPA AQI category."""
+    rows = query(
+        "SELECT source, sensor_id, value, ST_X(geom), ST_Y(geom) FROM readings "
+        "WHERE geom IS NOT NULL AND pollutant = 'pm25' ORDER BY ts DESC LIMIT 5000"
+    )
+    seen, features = set(), []
+    for source, sensor_id, value, lon, lat in rows:
+        if sensor_id in seen:
+            continue
+        seen.add(sensor_id)
+        aqi = pm25_aqi(value)
+        if not aqi:
+            continue
+        features.append({
+            "type": "Feature",
+            "geometry": {"type": "Point", "coordinates": [lon, lat]},
+            "properties": {
+                "source": source, "sensor_id": sensor_id,
+                "value": round(value, 1), "aqi": aqi[0], "category": aqi[1],
+            },
+        })
+    return {"type": "FeatureCollection", "features": features}
+
+
+def coverage():
+    """Headline counts for the station map."""
+    total, stations, sources = query(
+        "SELECT count(*), count(DISTINCT sensor_id), count(DISTINCT source) "
+        "FROM readings WHERE pollutant = 'pm25'"
+    )[0]
+    return {"readings": total, "stations": stations, "sources": sources}
+
+
 class Handler(BaseHTTPRequestHandler):
     def _send(self, body, ctype):
         self.send_response(200)
@@ -71,6 +110,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(json.dumps(stats()).encode(), "application/json")
             elif self.path.startswith("/api/geojson"):
                 self._send(json.dumps(geojson()).encode(), "application/json")
+            elif self.path.startswith("/api/readings"):
+                self._send(json.dumps(readings_geojson()).encode(), "application/json")
+            elif self.path.startswith("/api/coverage"):
+                self._send(json.dumps(coverage()).encode(), "application/json")
             else:
                 self.send_error(404)
         except Exception as error:

@@ -5,35 +5,43 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Air Quality, Live</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet-geosearch@3.11.0/dist/geosearch.css">
   <style>
     :root { color-scheme: dark; }
     * { box-sizing: border-box; }
     body { margin: 0; font-family: system-ui, sans-serif; background: #0f1420; color: #e6e9ef; }
-    header { padding: 16px 20px; border-bottom: 1px solid #232a3a; display: flex; justify-content: space-between; align-items: baseline; }
+    header { padding: 16px 20px; border-bottom: 1px solid #232a3a; display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 8px; }
     header h1 { font-size: 18px; margin: 0; }
+    header .sub { font-size: 12px; color: #8b93a7; margin-left: 10px; font-weight: 400; }
     #updated { font-size: 12px; color: #8b93a7; }
-    .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; padding: 16px 20px; }
+    .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; padding: 16px 20px; }
     .tile { background: #171d2b; border: 1px solid #232a3a; border-radius: 10px; padding: 14px 16px; }
-    .tile .label { font-size: 12px; color: #8b93a7; text-transform: uppercase; letter-spacing: .04em; }
-    .tile .value { font-size: 28px; font-weight: 600; margin-top: 4px; }
-    .grid { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; padding: 0 20px 20px; }
-    #map { height: 460px; border-radius: 10px; border: 1px solid #232a3a; }
+    .tile .label { font-size: 11px; color: #8b93a7; text-transform: uppercase; letter-spacing: .04em; }
+    .tile .value { font-size: 26px; font-weight: 600; margin-top: 4px; }
+    .grid { display: grid; grid-template-columns: 3fr 1fr; gap: 16px; padding: 0 20px 20px; }
+    #map { height: 560px; border-radius: 10px; border: 1px solid #232a3a; }
+    .panel h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: #8b93a7; margin: 4px 0 8px; }
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
     th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #232a3a; }
     th { color: #8b93a7; font-weight: 500; }
-    .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; color: #0f1420; }
-    @media (max-width: 800px) { .grid { grid-template-columns: 1fr; } }
+    .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; color: #0f1420; font-weight: 600; }
+    .legend { background: #171d2bee; padding: 8px 10px; border-radius: 8px; line-height: 18px; font-size: 12px; color: #cbd2e0; border: 1px solid #232a3a; }
+    .legend b { display: block; margin-bottom: 4px; color: #e6e9ef; font-size: 11px; text-transform: uppercase; letter-spacing: .03em; }
+    .legend i { display: inline-block; width: 11px; height: 11px; margin-right: 6px; border-radius: 50%; opacity: 0.9; vertical-align: -1px; }
+    .leaflet-control-geosearch form input { color: #111; }
+    @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } #map { height: 420px; } }
   </style>
 </head>
 <body>
   <header>
-    <h1>Real Time Air Quality Alerts</h1>
+    <h1>Real Time Air Quality, United States<span class="sub">live PM2.5 from OpenAQ &amp; EPA AirNow</span></h1>
     <span id="updated">connecting...</span>
   </header>
   <div class="tiles" id="tiles"></div>
   <div class="grid">
     <div id="map"></div>
-    <div>
+    <div class="panel">
+      <h2>Recent alerts (AQI &ge; 101)</h2>
       <table>
         <thead><tr><th>Sensor</th><th>Level</th><th>AQI</th><th>Time</th></tr></thead>
         <tbody id="recent"></tbody>
@@ -42,48 +50,94 @@
   </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet-geosearch@3.11.0/dist/geosearch.umd.js"></script>
   <script>
-    const COLORS = {
-      "Unhealthy for Sensitive Groups": "#f0a30a",
-      "Unhealthy": "#f97316",
-      "Very Unhealthy": "#8e44ad",
-      "Hazardous": "#dc2626",
-    };
-    const color = (lvl) => COLORS[lvl] || "#6b7280";
+    // Official EPA AQI category colors, one scale for the whole app.
+    const AQI = [
+      ["Good", "#00e400"],
+      ["Moderate", "#e6d800"],
+      ["Unhealthy for Sensitive Groups", "#ff7e00"],
+      ["Unhealthy", "#ff0000"],
+      ["Very Unhealthy", "#8f3f97"],
+      ["Hazardous", "#7e0023"],
+    ];
+    const COLOR = Object.fromEntries(AQI);
+    const color = (cat) => COLOR[cat] || "#6b7280";
 
-    const map = L.map("map").setView([40.5, -74.1], 9);
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      attribution: "OpenStreetMap", maxZoom: 18,
+    const map = L.map("map", { worldCopyJump: true }).setView([39.5, -98.35], 4);
+    L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+      attribution: "&copy; OpenStreetMap &copy; CARTO", maxZoom: 19,
     }).addTo(map);
-    let layer = L.layerGroup().addTo(map);
+
+    const readingsLayer = L.layerGroup().addTo(map);
+    const alertsLayer = L.layerGroup().addTo(map);
+    L.control.layers(null, {
+      "All stations": readingsLayer,
+      "Alerts (AQI &ge; 101)": alertsLayer,
+    }, { collapsed: false, position: "bottomleft" }).addTo(map);
+
+    // Search any US place, the map flies there. Free OSM geocoder, no key.
+    map.addControl(new GeoSearch.GeoSearchControl({
+      provider: new GeoSearch.OpenStreetMapProvider(),
+      style: "bar", showMarker: false, autoClose: true, searchLabel: "Search a city or place",
+    }));
+
+    const legend = L.control({ position: "bottomright" });
+    legend.onAdd = () => {
+      const div = L.DomUtil.create("div", "legend");
+      div.innerHTML = "<b>Air Quality Index</b>" +
+        AQI.map(([name, c]) => `<i style="background:${c}"></i>${name}`).join("<br>");
+      return div;
+    };
+    legend.addTo(map);
 
     function tile(label, value) {
       return `<div class="tile"><div class="label">${label}</div><div class="value">${value}</div></div>`;
     }
 
-    async function refresh() {
+    async function get(url) { return (await fetch(url)).json(); }
+
+    async function refreshStations() {
       try {
-        const s = await (await fetch("/api/stats")).json();
-        let tiles = tile("Total alerts", s.total)
-          + tile("Avg latency", s.avg_latency + "s")
-          + tile("Max latency", s.max_latency + "s");
-        for (const row of s.by_level) tiles += tile(row.level, row.count);
+        const gj = await get("/api/readings");
+        readingsLayer.clearLayers();
+        for (const f of gj.features) {
+          const [lon, lat] = f.geometry.coordinates, p = f.properties;
+          L.circleMarker([lat, lon], {
+            radius: 4, color: color(p.category), fillColor: color(p.category),
+            fillOpacity: 0.75, weight: 0.5,
+          }).bindPopup(
+            `<b>${p.category}</b><br>AQI ${p.aqi} &middot; PM2.5 ${p.value} &micro;g/m&sup3;`
+            + `<br><small>${p.source} &middot; sensor ${p.sensor_id}</small>`
+          ).addTo(readingsLayer);
+        }
+      } catch (e) { /* keep last view */ }
+    }
+
+    async function refreshLive() {
+      try {
+        const [s, cov] = await Promise.all([get("/api/stats"), get("/api/coverage")]);
+        let tiles = tile("Stations live", cov.stations)
+          + tile("Readings", cov.readings)
+          + tile("Data sources", cov.sources)
+          + tile("Alerts (AQI &ge; 101)", s.total)
+          + tile("Avg latency", s.avg_latency + "s");
         document.getElementById("tiles").innerHTML = tiles;
 
-        document.getElementById("recent").innerHTML = s.recent.map(r =>
+        document.getElementById("recent").innerHTML = (s.recent || []).map(r =>
           `<tr><td>${r.sensor_id}</td>`
           + `<td><span class="pill" style="background:${color(r.level)}">${r.level}</span></td>`
           + `<td>${r.value}</td><td>${new Date(r.ts).toLocaleTimeString()}</td></tr>`
         ).join("");
 
-        const gj = await (await fetch("/api/geojson")).json();
-        layer.clearLayers();
+        const gj = await get("/api/geojson");
+        alertsLayer.clearLayers();
         L.geoJSON(gj, {
           pointToLayer: (f, latlng) => L.circleMarker(latlng, {
-            radius: 6, color: color(f.properties.level),
-            fillColor: color(f.properties.level), fillOpacity: 0.8, weight: 1,
-          }).bindPopup(`${f.properties.level}: AQI ${f.properties.value} (sensor ${f.properties.sensor_id})`),
-        }).addTo(layer);
+            radius: 7, color: "#fff", weight: 1.5,
+            fillColor: color(f.properties.level), fillOpacity: 0.9,
+          }).bindPopup(`<b>${f.properties.level}</b><br>AQI ${f.properties.value} &middot; sensor ${f.properties.sensor_id}`),
+        }).addTo(alertsLayer);
 
         document.getElementById("updated").textContent = "updated " + new Date().toLocaleTimeString();
       } catch (e) {
@@ -91,8 +145,10 @@
       }
     }
 
-    refresh();
-    setInterval(refresh, 3000);
+    refreshStations();
+    refreshLive();
+    setInterval(refreshLive, 3000);
+    setInterval(refreshStations, 30000);
   </script>
 </body>
 </html>

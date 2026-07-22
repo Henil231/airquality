@@ -21,23 +21,28 @@ from datetime import datetime, timedelta, timezone
 OPENAQ_PM25 = 2
 
 
-def openaq_latest(limit):
+def openaq_latest(limit, pages=1):
     key = os.getenv("OPENAQ_KEY")
     if not key:
         # Fall back to synthetic readings so local dev needs no key or network.
         print("openaq key missing (set OPENAQ_KEY); using synthetic data", file=sys.stderr)
         yield from (None for _ in range(limit))
         return
-    request = urllib.request.Request(
-        f"https://api.openaq.org/v3/parameters/{OPENAQ_PM25}/latest?limit={limit}",
-        headers={"X-API-Key": key},
-    )
-    try:
-        payload = json.load(urllib.request.urlopen(request, timeout=10))
-        yield from payload.get("results", [])
-    except Exception as error:
-        print(f"openaq unavailable ({error}); using synthetic data", file=sys.stderr)
-        yield from (None for _ in range(limit))
+    for page in range(1, pages + 1):
+        request = urllib.request.Request(
+            f"https://api.openaq.org/v3/parameters/{OPENAQ_PM25}/latest?limit={limit}&page={page}",
+            headers={"X-API-Key": key},
+        )
+        try:
+            results = json.load(urllib.request.urlopen(request, timeout=15)).get("results", [])
+        except Exception as error:
+            print(f"openaq unavailable ({error}); using synthetic data", file=sys.stderr)
+            if page == 1:
+                yield from (None for _ in range(limit))
+            return
+        yield from results
+        if len(results) < limit:
+            return
 
 
 def to_reading(raw):
@@ -66,7 +71,7 @@ def to_reading(raw):
     }
 
 
-def airnow_latest(limit):
+def airnow_latest(limit, pages=1):
     key = os.getenv("AIRNOW_KEY")
     if not key:
         print("airnow key missing (set AIRNOW_KEY); skipping", file=sys.stderr)
@@ -104,7 +109,7 @@ def airnow_reading(raw):
     }
 
 
-def purpleair_latest(limit):
+def purpleair_latest(limit, pages=1):
     key = os.getenv("PURPLEAIR_KEY")
     if not key:
         print("purpleair key missing (set PURPLEAIR_KEY); skipping", file=sys.stderr)
@@ -181,12 +186,29 @@ def main():
     parser.add_argument("--pg", default="postgresql://air:air@localhost:5432/air")
     parser.add_argument("--sources", default="openaq")
     parser.add_argument("--limit", type=int, default=50)
+    parser.add_argument("--pages", type=int, default=1,
+                        help="pages to pull per source, raise it for wider coverage (openaq)")
+    parser.add_argument("--bbox", default="",
+                        help="minlon,minlat,maxlon,maxlat filter, US is -125,24,-66,50")
     parser.add_argument("--loops", type=int, default=1)
     parser.add_argument("--interval", type=float, default=60,
                         help="seconds between loops, lower it to simulate a fast live feed")
     args = parser.parse_args()
 
     sources = [name for name in args.sources.split(",") if name]
+    box = [float(v) for v in args.bbox.split(",")] if args.bbox else None
+
+    def keep(reading):
+        # Drop sensor sentinels (-999) and impossible spikes so bad data never
+        # reaches the map or skews the trend averages.
+        value = reading["value"]
+        if reading["pollutant"] == "pm25" and not (0 <= value <= 1000):
+            return False
+        if box is not None:
+            lat, lon = reading["lat"], reading["lon"]
+            if lat is None or lon is None or not (box[0] <= lon <= box[2] and box[1] <= lat <= box[3]):
+                return False
+        return True
 
     for iteration in range(args.loops):
         readings = []
@@ -195,7 +217,7 @@ def main():
                 print(f"unknown source {name}; skipping", file=sys.stderr)
                 continue
             fetch, to_dict = SOURCES[name]
-            readings.extend(to_dict(raw) for raw in fetch(args.limit))
+            readings.extend(r for r in (to_dict(raw) for raw in fetch(args.limit, args.pages)) if keep(r))
         if args.sink == "kafka":
             write_kafka(readings, args.bootstrap, args.topic)
         elif args.sink == "postgres":

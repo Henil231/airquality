@@ -106,6 +106,14 @@ case "${1:-}" in
     docker compose exec -T db psql -U air -d air -tA < map/export_geojson.sql > map/alerts.geojson
     echo "wrote map/alerts.geojson"
     ;;
+  usmap)
+    # Seed the readings table with live PM2.5 across the continental US so the
+    # dashboard shows every station colored by AQI. Needs OPENAQ_KEY, AIRNOW_KEY.
+    docker compose exec -T db psql -U air -d air -c "TRUNCATE readings;" >/dev/null
+    $RUN python airflow "$PROJ/fetchers/fetch.py" --sink postgres --pg "$PG_DSN" \
+      --sources openaq,airnow --limit 1000 --pages 6 --bbox=-125,24,-66,50
+    echo "seeded US-wide readings. open the dashboard: http://localhost:8050"
+    ;;
   airflow)
     docker compose up -d --build airflow
     echo "airflow UI: http://localhost:8080  user admin"
@@ -116,7 +124,7 @@ case "${1:-}" in
     docker compose down
     ;;
   *)
-    echo "usage: ./local.sh {demo [real]|stop|up|stream [real]|batch [real]|load [N]|results|map|airflow|down}"
+    echo "usage: ./local.sh {demo [real]|stop|up|stream [real]|batch [real]|load [N]|results|map|usmap|airflow|down}"
     exit 1
     ;;
 esac
