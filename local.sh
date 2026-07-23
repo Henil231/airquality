@@ -114,6 +114,19 @@ case "${1:-}" in
       --sources openaq,airnow --limit 1000 --pages 6 --bbox=-125,24,-66,50
     echo "seeded US-wide readings. open the dashboard: http://localhost:8050"
     ;;
+  us)
+    # One command for the full US live map: infra, the station layer, and the
+    # alert layer streamed through Kafka. Needs OPENAQ_KEY and AIRNOW_KEY in .env.
+    US="--sources openaq,airnow --limit 1000 --pages 6 --bbox=-125,24,-66,50"
+    start_infra
+    docker compose exec -T db psql -U air -d air -c "TRUNCATE readings;" >/dev/null
+    $RUN python airflow "$PROJ/fetchers/fetch.py" --sink postgres --pg "$PG_DSN" $US
+    fresh_topic
+    $RUN python airflow "$PROJ/fetchers/fetch.py" --sink kafka --bootstrap "$KAFKA" --topic readings $US
+    $RUN spark-submit airflow --packages "$PACKAGES" "$PROJ/spark/stream_alerts.py" \
+      --bootstrap "$KAFKA" --topic readings --pg "$PG_JDBC" --once
+    echo "US live map ready: http://localhost:8050"
+    ;;
   airflow)
     docker compose up -d --build airflow
     echo "airflow UI: http://localhost:8080  user admin"
@@ -124,7 +137,7 @@ case "${1:-}" in
     docker compose down
     ;;
   *)
-    echo "usage: ./local.sh {demo [real]|stop|up|stream [real]|batch [real]|load [N]|results|map|usmap|airflow|down}"
+    echo "usage: ./local.sh {demo [real]|us|stop|up|stream [real]|batch [real]|load [N]|results|map|usmap|airflow|down}"
     exit 1
     ;;
 esac

@@ -102,6 +102,7 @@ map climb. Stop the feed with `./local.sh stop`, tear it all down with `./local.
 | `./local.sh stream [real]` | Fast lane once: produce, drain, write alerts |
 | `./local.sh batch [real]` | Batch lane: seed readings, build monthly trends |
 | `./local.sh load [N]` | Throughput test: push N readings fast, measure the drain (default 5000) |
+| `./local.sh us` | One command for the full US live map: infra, station layer, and alerts (needs keys) |
 | `./local.sh map` | Export recent alerts to map/alerts.geojson |
 | `./local.sh usmap` | Seed live PM2.5 across the continental US, fills the station map (needs keys) |
 | `./local.sh airflow` | Start the Airflow UI at http://localhost:8080 |
