@@ -22,6 +22,10 @@ RUN="docker compose run --rm --no-deps -w /tmp --entrypoint"
 # "real" pulls the live APIs, anything else stays on the free synthetic feed.
 sources() { [ "${1:-}" = "real" ] && echo "openaq,airnow,purpleair" || echo "openaq"; }
 
+# Real stations refresh every few minutes to an hour, polling them every
+# second just re-reads the same snapshot. Synthetic keeps the fast cadence.
+feed_params() { [ "${1:-}" = "real" ] && echo "100 20 30" || echo "50 600 1"; }
+
 topic() {
   docker compose exec -T kafka /opt/kafka/bin/kafka-topics.sh \
     --create --if-not-exists --topic readings --bootstrap-server localhost:9092 >/dev/null
@@ -45,6 +49,7 @@ start_infra() {
 
 start_live() {
   local src; src=$(sources "${1:-}")
+  local limit loops interval; read -r limit loops interval <<< "$(feed_params "${1:-}")"
   fresh_topic
   docker rm -f air-stream air-feed >/dev/null 2>&1 || true
   docker compose run -d --name air-stream --no-deps -w /tmp --entrypoint spark-submit airflow \
@@ -54,7 +59,7 @@ start_live() {
   sleep 25
   docker compose run -d --name air-feed --no-deps -w /tmp --entrypoint python airflow \
     "$PROJ/fetchers/fetch.py" --sink kafka --bootstrap "$KAFKA" --topic readings \
-    --sources "$src" --limit 50 --loops 600 --interval 1 >/dev/null
+    --sources "$src" --limit "$limit" --loops "$loops" --interval "$interval" >/dev/null
 }
 
 case "${1:-}" in

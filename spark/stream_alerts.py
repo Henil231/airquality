@@ -17,6 +17,9 @@ PM25_BREAKPOINTS = [
 # Alert at Unhealthy for Sensitive Groups and above.
 ALERT_AQI_DEFAULT = 101
 
+# A sensor repeating the same AQI within this window does not alert again.
+DEDUP_WINDOW_DEFAULT = "1 hour"
+
 
 def pm25_aqi(value):
     """Return (AQI, category) for a PM2.5 concentration in ug/m3, or None if invalid."""
@@ -49,8 +52,10 @@ def parse(stream):
     ).select("d.*")
 
 
-def flag_breaches(readings, alert_aqi=ALERT_AQI_DEFAULT):
+def flag_breaches(readings, alert_aqi=ALERT_AQI_DEFAULT, dedup_window=DEDUP_WINDOW_DEFAULT):
     # Single home for the alert decision. AQI math lives in pm25_aqi.
+    # A sensor repeating its last reading within the window is not a new
+    # breach, so it is dropped rather than re-alerted.
     from pyspark.sql import functions as F, types as T
     aqi_type = T.StructType([
         T.StructField("aqi", T.IntegerType()),
@@ -69,6 +74,8 @@ def flag_breaches(readings, alert_aqi=ALERT_AQI_DEFAULT):
             "lat", "lon",
             F.to_timestamp(F.col("ts")).alias("ts"),
         )
+        .withWatermark("ts", dedup_window)
+        .dropDuplicatesWithinWatermark(["sensor_id", "value"])
     )
 
 
@@ -79,6 +86,8 @@ def main():
     parser.add_argument("--pg", required=True)
     parser.add_argument("--alert-aqi", type=int,
                         default=int(os.getenv("ALERT_AQI", ALERT_AQI_DEFAULT)))
+    parser.add_argument("--dedup-window", default=os.getenv("DEDUP_WINDOW", DEDUP_WINDOW_DEFAULT),
+                        help="skip re-alerting a sensor's unchanged AQI within this window")
     parser.add_argument("--once", action="store_true",
                         help="drain the topic once and exit, for tests and evidence runs")
     parser.add_argument("--from-start", action="store_true",
@@ -96,7 +105,7 @@ def main():
         .option("startingOffsets", "earliest" if (args.once or args.from_start) else "latest")
         .load()
     )
-    alerts = flag_breaches(parse(stream), args.alert_aqi)
+    alerts = flag_breaches(parse(stream), args.alert_aqi, args.dedup_window)
 
     def to_postgres(batch, _epoch_id):
         (

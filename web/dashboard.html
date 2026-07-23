@@ -22,6 +22,7 @@
     th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #232a3a; }
     th { color: #8b93a7; font-weight: 500; }
     .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; color: #0f1420; }
+    .section-label { padding: 0 20px; color: #8b93a7; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
     @media (max-width: 800px) { .grid { grid-template-columns: 1fr; } }
   </style>
 </head>
@@ -39,6 +40,14 @@
         <tbody id="recent"></tbody>
       </table>
     </div>
+  </div>
+
+  <div class="section-label">Monthly trends, batch lane</div>
+  <div style="padding: 8px 20px 20px;">
+    <table>
+      <thead><tr><th>Sensor</th><th>Pollutant</th><th>Month</th><th>Avg</th><th>Max</th></tr></thead>
+      <tbody id="trends"></tbody>
+    </table>
   </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -78,12 +87,20 @@
 
         const gj = await (await fetch("/api/geojson")).json();
         layer.clearLayers();
-        L.geoJSON(gj, {
+        const geoLayer = L.geoJSON(gj, {
           pointToLayer: (f, latlng) => L.circleMarker(latlng, {
             radius: 6, color: color(f.properties.level),
             fillColor: color(f.properties.level), fillOpacity: 0.8, weight: 1,
           }).bindPopup(`${f.properties.level}: AQI ${f.properties.value} (sensor ${f.properties.sensor_id})`),
         }).addTo(layer);
+        if (gj.features && gj.features.length) map.fitBounds(geoLayer.getBounds(), { maxZoom: 10 });
+
+        const trends = await (await fetch("/api/trends")).json();
+        document.getElementById("trends").innerHTML = trends.map(t =>
+          `<tr><td>${t.sensor_id}</td><td>${t.pollutant}</td>`
+          + `<td>${new Date(t.month).toLocaleDateString(undefined, { year: "numeric", month: "short" })}</td>`
+          + `<td>${t.avg_value}</td><td>${t.max_value}</td></tr>`
+        ).join("");
 
         document.getElementById("updated").textContent = "updated " + new Date().toLocaleTimeString();
       } catch (e) {

@@ -43,6 +43,17 @@ def stats():
     }
 
 
+def trends():
+    rows = query(
+        "SELECT sensor_id, pollutant, month, round(avg_value::numeric, 1), "
+        "round(max_value::numeric, 1) FROM trends ORDER BY month DESC, sensor_id LIMIT 15"
+    )
+    return [
+        {"sensor_id": s, "pollutant": p, "month": m.isoformat(), "avg_value": float(a), "max_value": float(x)}
+        for s, p, m, a, x in rows
+    ]
+
+
 def geojson():
     rows = query(
         "SELECT json_build_object('type', 'FeatureCollection', 'features', "
@@ -71,6 +82,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(json.dumps(stats()).encode(), "application/json")
             elif self.path.startswith("/api/geojson"):
                 self._send(json.dumps(geojson()).encode(), "application/json")
+            elif self.path.startswith("/api/trends"):
+                self._send(json.dumps(trends()).encode(), "application/json")
             else:
                 self.send_error(404)
         except Exception as error:

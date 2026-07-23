@@ -16,14 +16,18 @@ import urllib.request
 from datetime import datetime, timezone
 
 
+PM25_PARAMETER_ID = 2  # OpenAQ v3 parameter id for pm25
+HTTP_TIMEOUT = 25  # continental-US queries can take several seconds to return
+
+
 def openaq_latest(limit):
     key = os.getenv("OPENAQ_KEY")
     request = urllib.request.Request(
-        f"https://api.openaq.org/v3/latest?limit={limit}",
+        f"https://api.openaq.org/v3/parameters/{PM25_PARAMETER_ID}/latest?limit={limit}",
         headers={"X-API-Key": key} if key else {},
     )
     try:
-        payload = json.load(urllib.request.urlopen(request, timeout=10))
+        payload = json.load(urllib.request.urlopen(request, timeout=HTTP_TIMEOUT))
         yield from payload.get("results", [])
     except Exception as error:
         # Fall back to synthetic readings so local dev needs no key or network.
@@ -36,10 +40,10 @@ def to_reading(raw):
         coords = raw.get("coordinates") or {}
         return {
             "source": "openaq",
-            "sensor_id": str(raw.get("location", "unknown")),
-            "pollutant": raw.get("parameter", "pm25"),
+            "sensor_id": str(raw.get("locationsId", "unknown")),
+            "pollutant": "pm25",
             "value": float(raw.get("value", 0) or 0),
-            "unit": raw.get("unit", "ug/m3"),
+            "unit": "ug/m3",
             "lat": coords.get("latitude"),
             "lon": coords.get("longitude"),
             "ts": time.time(),
@@ -71,7 +75,7 @@ def airnow_latest(limit):
         f"&API_KEY={key}"
     )
     try:
-        payload = json.load(urllib.request.urlopen(request, timeout=10))
+        payload = json.load(urllib.request.urlopen(request, timeout=HTTP_TIMEOUT))
         yield from payload[:limit]
     except Exception as error:
         print(f"airnow unavailable ({error}); skipping", file=sys.stderr)
@@ -102,7 +106,7 @@ def purpleair_latest(limit):
         headers={"X-API-Key": key},
     )
     try:
-        payload = json.load(urllib.request.urlopen(request, timeout=10))
+        payload = json.load(urllib.request.urlopen(request, timeout=HTTP_TIMEOUT))
         # Data rows are positional, so pair them with the field names.
         fields = payload.get("fields", [])
         for row in payload.get("data", [])[:limit]:
