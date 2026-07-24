@@ -1,0 +1,16 @@
+[environment: untagged] Read more to tag: g.co/cloud/project-env-tag.
+Updated property [core/project].
+Waiting on operation [projects/project-7116031e-6963-4c55-85c/regions/us-central1/operations/8cf6331c-f3df-37b2-97b4-7eba4214e7ea].
+Waiting for cluster deletion operation...
+.............................................................................................................................................................................................................done.
+Deleted [https://dataproc.googleapis.com/v1/projects/project-7116031e-6963-4c55-85c/regions/us-central1/clusters/air-demo].
+The following message will be used for the patch API method.
+{"name": "air-sql", "project": "project-7116031e-6963-4c55-85c", "settings": {"activationPolicy": "NEVER"}}
+Patching Cloud SQL instance...
+......done.
+Updated [https://sqladmin.googleapis.com/sql/v1beta4/projects/project-7116031e-6963-4c55-85c/instances/air-sql].
+verifying nothing is left running:
+Listed 0 items.
+NAME     STATUS
+air-sql  STOPPED
+expect no clusters and the sql instance STOPPED

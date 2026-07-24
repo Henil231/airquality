@@ -13,34 +13,45 @@ import random
 import sys
 import time
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 
-PM25_PARAMETER_ID = 2  # OpenAQ v3 parameter id for pm25
-HTTP_TIMEOUT = 25  # continental-US queries can take several seconds to return
+# OpenAQ v3 serves latest readings per parameter, there is no global /latest.
+# 2 is pm25, confirm with GET /v3/parameters.
+OPENAQ_PM25 = 2
 
 
-def openaq_latest(limit):
+def openaq_latest(limit, pages=1):
     key = os.getenv("OPENAQ_KEY")
-    request = urllib.request.Request(
-        f"https://api.openaq.org/v3/parameters/{PM25_PARAMETER_ID}/latest?limit={limit}",
-        headers={"X-API-Key": key} if key else {},
-    )
-    try:
-        payload = json.load(urllib.request.urlopen(request, timeout=HTTP_TIMEOUT))
-        yield from payload.get("results", [])
-    except Exception as error:
+    if not key:
         # Fall back to synthetic readings so local dev needs no key or network.
-        print(f"openaq unavailable ({error}); using synthetic data", file=sys.stderr)
+        print("openaq key missing (set OPENAQ_KEY); using synthetic data", file=sys.stderr)
         yield from (None for _ in range(limit))
+        return
+    for page in range(1, pages + 1):
+        request = urllib.request.Request(
+            f"https://api.openaq.org/v3/parameters/{OPENAQ_PM25}/latest?limit={limit}&page={page}",
+            headers={"X-API-Key": key},
+        )
+        try:
+            results = json.load(urllib.request.urlopen(request, timeout=15)).get("results", [])
+        except Exception as error:
+            print(f"openaq unavailable ({error}); using synthetic data", file=sys.stderr)
+            if page == 1:
+                yield from (None for _ in range(limit))
+            return
+        yield from results
+        if len(results) < limit:
+            return
 
 
 def to_reading(raw):
     if raw:
         coords = raw.get("coordinates") or {}
+        # v3 latest carries no parameter or unit field, both are fixed by the endpoint.
         return {
             "source": "openaq",
-            "sensor_id": str(raw.get("locationsId", "unknown")),
+            "sensor_id": str(raw.get("sensorsId", "unknown")),
             "pollutant": "pm25",
             "value": float(raw.get("value", 0) or 0),
             "unit": "ug/m3",
@@ -60,16 +71,19 @@ def to_reading(raw):
     }
 
 
-def airnow_latest(limit):
+def airnow_latest(limit, pages=1):
     key = os.getenv("AIRNOW_KEY")
     if not key:
         print("airnow key missing (set AIRNOW_KEY); skipping", file=sys.stderr)
         return
-    # Current hour PM2.5 observations across the continental US bounding box.
-    hour = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H")
+    # PM2.5 across the continental US. AirNow publishes with a lag, so ask for a
+    # two hour window, a single current hour usually comes back empty.
+    now = datetime.now(timezone.utc)
+    end = now.strftime("%Y-%m-%dT%H")
+    start = (now - timedelta(hours=2)).strftime("%Y-%m-%dT%H")
     request = urllib.request.Request(
         "https://www.airnowapi.org/aq/data/"
-        f"?startDate={hour}&endDate={hour}"
+        f"?startDate={start}&endDate={end}"
         "&parameters=PM25&BBOX=-125,24,-66,50"
         "&dataType=B&format=application/json&verbose=1"
         f"&API_KEY={key}"
@@ -95,7 +109,7 @@ def airnow_reading(raw):
     }
 
 
-def purpleair_latest(limit):
+def purpleair_latest(limit, pages=1):
     key = os.getenv("PURPLEAIR_KEY")
     if not key:
         print("purpleair key missing (set PURPLEAIR_KEY); skipping", file=sys.stderr)
@@ -172,12 +186,29 @@ def main():
     parser.add_argument("--pg", default="postgresql://air:air@localhost:5432/air")
     parser.add_argument("--sources", default="openaq")
     parser.add_argument("--limit", type=int, default=50)
+    parser.add_argument("--pages", type=int, default=1,
+                        help="pages to pull per source, raise it for wider coverage (openaq)")
+    parser.add_argument("--bbox", default="",
+                        help="minlon,minlat,maxlon,maxlat filter, US is -125,24,-66,50")
     parser.add_argument("--loops", type=int, default=1)
     parser.add_argument("--interval", type=float, default=60,
                         help="seconds between loops, lower it to simulate a fast live feed")
     args = parser.parse_args()
 
     sources = [name for name in args.sources.split(",") if name]
+    box = [float(v) for v in args.bbox.split(",")] if args.bbox else None
+
+    def keep(reading):
+        # Drop sensor sentinels (-999) and impossible spikes so bad data never
+        # reaches the map or skews the trend averages.
+        value = reading["value"]
+        if reading["pollutant"] == "pm25" and not (0 <= value <= 1000):
+            return False
+        if box is not None:
+            lat, lon = reading["lat"], reading["lon"]
+            if lat is None or lon is None or not (box[0] <= lon <= box[2] and box[1] <= lat <= box[3]):
+                return False
+        return True
 
     for iteration in range(args.loops):
         readings = []
@@ -186,7 +217,7 @@ def main():
                 print(f"unknown source {name}; skipping", file=sys.stderr)
                 continue
             fetch, to_dict = SOURCES[name]
-            readings.extend(to_dict(raw) for raw in fetch(args.limit))
+            readings.extend(r for r in (to_dict(raw) for raw in fetch(args.limit, args.pages)) if keep(r))
         if args.sink == "kafka":
             write_kafka(readings, args.bootstrap, args.topic)
         elif args.sink == "postgres":
