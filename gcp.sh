@@ -32,7 +32,9 @@ case "${1:-}" in
   up)
     gcloud sql instances patch "$SQL_INSTANCE" --activation-policy=ALWAYS -q
     gcloud dataproc clusters create "$CLUSTER" --region="$REGION" --single-node \
-      --image-version=2.2-debian12 --initialization-actions="$INIT" \
+      ${ZONE:+--zone="$ZONE"} ${MACHINE:+--master-machine-type="$MACHINE"} ${NO_ADDRESS:+--no-address} \
+      --image-version=2.2-debian12 --optional-components=ZOOKEEPER \
+      --initialization-actions="$INIT" \
       --scopes=cloud-platform \
       --metadata="additional-cloud-sql-instances=${PROJECT}:${REGION}:${SQL_INSTANCE}=tcp:5432,enable-cloud-sql-hive-metastore=false"
     echo "up. broker: ${CLUSTER}-m:9092  cloud sql via proxy on localhost:5432"
@@ -40,12 +42,12 @@ case "${1:-}" in
     ;;
   stream)
     gcloud dataproc jobs submit pyspark spark/stream_alerts.py \
-      --cluster="$CLUSTER" --region="$REGION" --properties="spark.jars.packages=$PACKAGES" \
+      --cluster="$CLUSTER" --region="$REGION" --properties="^#^spark.jars.packages=$PACKAGES" \
       -- --bootstrap "${CLUSTER}-m:9092" --topic readings --pg "$PGURL"
     ;;
   batch)
     gcloud dataproc jobs submit pyspark spark/batch_trends.py \
-      --cluster="$CLUSTER" --region="$REGION" --properties="spark.jars.packages=$PACKAGES" \
+      --cluster="$CLUSTER" --region="$REGION" --properties="^#^spark.jars.packages=$PACKAGES" \
       -- --pg "$PGURL"
     ;;
   down)

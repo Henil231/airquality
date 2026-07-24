@@ -5,3 +5,4 @@ spark-warehouse/
 metastore_db/
 derby.log
 map/alerts.geojson
+.DS_Store

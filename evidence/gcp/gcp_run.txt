@@ -1,0 +1,33 @@
+==== GCP DATAPROC RUN EVIDENCE  (project-7116031e-6963-4c55-85c) ====
+
+--- Dataproc cluster ---
+NAME      STATUS   ZONE_URI       IMAGE_VERSION
+air-demo  RUNNING  us-central1-a  2.2.84-debian12
+
+--- Dataproc jobs (batch trends) ---
+JOB_ID                            STATUS  TYPE
+778f704f1b324932aaeb3fe010714168  DONE
+90fcf0ec0b024ed9950a333a35eabbef  ERROR
+
+--- Cloud SQL instance ---
+NAME     DATABASE_VERSION  STATUS
+air-sql  POSTGRES_16       RUNNABLE
+
+--- Trends written to Cloud SQL by the cloud Spark job ---
+ trend_rows 
+------------
+         74
+(1 row)
+
+ sensor_id |  month  |  avg  |  max  
+-----------+---------+-------+-------
+ s1        | 2026-07 | 108.5 | 286.9
+ s10       | 2026-07 | 210.7 | 299.5
+ s11       | 2026-07 | 243.0 | 270.6
+ s12       | 2026-07 |  56.5 |  91.2
+ s13       | 2026-07 | 141.5 | 269.9
+ s14       | 2026-07 | 204.4 | 272.5
+ s15       | 2026-07 | 117.6 | 261.1
+ s16       | 2026-07 | 128.1 | 274.3
+(8 rows)
+
