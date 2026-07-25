@@ -19,6 +19,7 @@ from datetime import datetime, timedelta, timezone
 # OpenAQ v3 serves latest readings per parameter, there is no global /latest.
 # 2 is pm25, confirm with GET /v3/parameters.
 OPENAQ_PM25 = 2
+HTTP_TIMEOUT = 25  # continental-US queries can take several seconds
 
 
 def openaq_latest(limit, pages=1):
